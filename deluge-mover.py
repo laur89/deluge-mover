@@ -15,35 +15,12 @@ from urllib.parse import urlparse
 deluge_webui = "http://localhost:8112/json"
 deluge_password = "deluged"
 
-# this changes whether the actual cache drive is checked for
-# applicable files to pause/move before pausing.
-#
-# if this is false, it will pause all torrents in the age-range
-# instead of only torrents in that range that exist on the cache
-check_fs = False
-
-# if you are using the mover tuner and don't want to use it for
-# this script, set this to true
-#
-# if you do not use mover tuner, leave this as false
-use_mover_old = False
-
 # this is the absolute host path to your cache drive's downloads
 # you only need this to be changed/set if using 'check_fs = True'
-cache_download_path = "/mnt/cache/torrents/completed"
+cache_download_path = "/mnt/user/data/torrents/completed"
 
-# the age range of days to look for relevant torrents to move
-# i dont recommend setting age_day_max to less than the schedule
-# you run the script on...
-#
-# if you run every 7 days, this should be at least 7 to prevent
-# files from being stuck on your cache forever
-#
-# 0 disables age_day_max
-# set both age vars to 0 to move everything on your cache drive
-
-age_day_min = 3
-age_day_max = 0
+# this is the number of hours you wish to leave the torrents paused
+sleep_time_hours = 6
 
 ### STOP EDITING HERE ###
 ### STOP EDITING HERE ###
@@ -137,37 +114,26 @@ class DelugeHandler:
             deluge_cookie = None
 
 
-def find_file_on_cache(dir, file):
+def find_file_on_disk(dir, file):
     for root, dirs, files in walk(dir):
-        if file in files:
+        if file in files or file in dirs:
             return path.join(root, file)
     return None
 
 
 def filter_added_time(t_object):
-    cached_file = False
     if t_object.get("time_added", None) is None:
         print(
             f"\n\n[{CRED}json-rpc{CEND}/{CRED}error{CEND}]: Deluge state has been {CRED}corrupted{CEND}. Please {CYELLOW}restart{CEND} the Deluge to correct this.\n\n"
         )
         exit(1)
-    time_elapsed = int(time.time()) - t_object.get("time_added", [None])
     current_path = path.join(cache_download_path, t_object.get("name", [None]))
-    if time_elapsed >= (age_day_min * 60 * 60 * 24) and (
-        (time_elapsed <= (age_day_max * 60 * 60 * 24)) or (age_day_max == 0)
-    ):
-        if check_fs:
-            if path.exists(current_path):
-                cached_file = True
-            elif (
-                find_file_on_cache(cache_download_path, t_object.get("name", [None]))
-                != None
-            ):
-                cached_file = True
-        else:
-            cached_file = True
-        return cached_file
-    return False
+
+    if path.exists(current_path):
+        return False
+    elif find_file_on_disk(cache_download_path, t_object.get("name", [None])) != None:
+        return False
+    return True
 
 
 async def main():
@@ -205,15 +171,7 @@ async def main():
                 exit(0)
             # loop through items in torrent list
             for hash, values in filtered_torrents:
-                if check_fs:
-                    save_path = path.join(
-                        cache_download_path, values.get("name", [None])
-                    )
-                else:
-                    save_path = path.join(
-                        values.get("save_path", [None]), values.get("name", [None])
-                    )
-
+                save_path = path.join(cache_download_path, values.get("name", [None]))
                 print(
                     f"[{CRED}pause_torrent{CEND}]: {CBOLD}{values.get('name', [None])}{CEND}"
                     f"\n\t\t {CYELLOW}info_hash{CEND}: {hash}"
@@ -226,19 +184,8 @@ async def main():
                 f"[{CRED}pause_summary{CEND}]: paused {CYELLOW}{CBOLD}{len(filtered_torrents)}{CEND} torrents...\n"
             )
 
-            time.sleep(10)
+            time.sleep(sleep_time_hours * 60 * 60)
 
-            # run the mover
-            print(
-                f"[{CGREEN}init{CEND}] -> {CYELLOW}{CBOLD}Executing unRAID Mover...{CEND}\n"
-            )
-
-            if use_mover_old:
-                system("/usr/local/sbin/mover.old start")
-            else:
-                system("/usr/local/sbin/mover start")
-
-            time.sleep(10)
             print("\n\n")
 
             # resume all the torrents we previously paused
